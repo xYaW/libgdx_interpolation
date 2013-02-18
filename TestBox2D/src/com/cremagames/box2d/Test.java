@@ -125,8 +125,7 @@ public class Test implements ApplicationListener, InputProcessor {
 		case semifixed:
 			motorLabel="semiFixed";
             boolean stepped = fixedStep(Gdx.graphics.getDeltaTime());
-            if(stepped) singleStep(TIME_STEP);
-            setSrpiteStates();
+            if(stepped) setSrpiteStates();
 			break;
 		case nothing:
 			motorLabel="nothing";
