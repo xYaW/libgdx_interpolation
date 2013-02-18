@@ -2,10 +2,13 @@ package com.cremagames.box2d;
 
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.InputProcessor;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL10;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector2;
@@ -30,11 +33,29 @@ public class Test implements ApplicationListener, InputProcessor {
 	
 	private boolean puedeSaltar = true;
 	
-	private final float FIXED_TIMESTEP = 1f/60f;
 	private float fixedTimestepAccumulator = 0;
 	private float fixedTimestepAccumulatorRatio = 0;
-	private int velocityIterations = 6;
-	private int positionIterations = 1;
+
+	
+	   private final static int MAX_FPS = 45;
+       private final static int MIN_FPS = 15;
+       public final static float TIME_STEP = 1f / MAX_FPS;
+       private final static float MAX_STEPS = 1f + MAX_FPS / MIN_FPS;
+       private final static float MAX_TIME_PER_FRAME = TIME_STEP * MAX_STEPS;
+       private final static int VELOCITY_ITERS = 6;
+       private final static int POSITION_ITERS = 2;
+       float physicsTimeLeft;
+	
+	final int interpolation=0;
+	final int semifixed=1;
+	final int nothing=2;
+	int motor=nothing;
+	
+	int w;
+	int h;
+	
+	BitmapFont font;
+	
 	
 	@Override
 	public void create() {		
@@ -44,6 +65,9 @@ public class Test implements ApplicationListener, InputProcessor {
 		world.setAutoClearForces(false);
 		debugRenderer = new Box2DDebugRenderer();
 		batch = new SpriteBatch();
+		
+		font = new BitmapFont();
+		font.setColor(Color.BLACK);
 		
 		Gdx.input.setInputProcessor(this);
 		
@@ -60,7 +84,7 @@ public class Test implements ApplicationListener, InputProcessor {
 		
 		world.setContactListener(contactListener);
 		
-		player.getBody().setLinearVelocity(8, 0);
+		player.getBody().setLinearVelocity(5, 0);
 	}
 
 	@Override
@@ -75,31 +99,53 @@ public class Test implements ApplicationListener, InputProcessor {
 		Gdx.gl.glClearColor(0, 0, 0, 1);
 		Gdx.gl.glClear(GL10.GL_COLOR_BUFFER_BIT);
 		
-	    int MAX_STEPS = 5;
-	    fixedTimestepAccumulator += Gdx.graphics.getDeltaTime();
-	    int nSteps = (int) Math.floor(fixedTimestepAccumulator / FIXED_TIMESTEP);
-	 
-	    if (nSteps > 0)
-	    {
-	        fixedTimestepAccumulator -= nSteps * FIXED_TIMESTEP;
-	    }
-	    fixedTimestepAccumulatorRatio = fixedTimestepAccumulator / FIXED_TIMESTEP;
-	    int nStepsClamped = Math.min(nSteps, MAX_STEPS);
-	 
-	    for (int i = 0; i < nStepsClamped; ++i)
-	    {
-	    	resetSmoothStates();
-	    	singleStep(FIXED_TIMESTEP);
-	    }
-	    world.clearForces();
-	    smoothStates();
+		String motorLabel="";
+		switch(motor){
+		case interpolation:
+			motorLabel="Interpolation";
+		    int MAX_STEPS = 5;
+		    fixedTimestepAccumulator += Gdx.graphics.getDeltaTime();
+		    int nSteps = (int) Math.floor(fixedTimestepAccumulator / TIME_STEP);
+		 
+		    if (nSteps > 0)
+		    {
+		        fixedTimestepAccumulator -= nSteps * TIME_STEP;
+		    }
+		    fixedTimestepAccumulatorRatio = fixedTimestepAccumulator / TIME_STEP;
+		    int nStepsClamped = Math.min(nSteps, MAX_STEPS);
+		 
+		    for (int i = 0; i < nStepsClamped; ++i)
+		    {
+		    	resetSmoothStates();
+		    	singleStep(TIME_STEP);
+		    }
+		    world.clearForces();
+		    smoothStates();
+		    break;
+		case semifixed:
+			motorLabel="semiFixed";
+            boolean stepped = fixedStep(Gdx.graphics.getDeltaTime());
+            if(stepped) singleStep(TIME_STEP);
+            setSrpiteStates();
+			break;
+		case nothing:
+			motorLabel="nothing";
+			singleStep(Gdx.graphics.getDeltaTime());
+            setSrpiteStates();
+            break;
+		}
+
 	    
 	    batch.setProjectionMatrix(camera.combined);
 	    batch.begin();
 	    batch.draw(txtBack, 0, 0);
 	    player.getSprite().draw(batch);
 	    level.getSprite().draw(batch);
+	    font.draw(batch,"Motor: "+motorLabel , w/2, h/2);
 	    batch.end();
+	    
+	    
+	    
 	    
 	    //Reset the player if it is offscreen
   	    if(player.getBody().getPosition().x > 800 * Util.WORLD_TO_BOX){
@@ -110,15 +156,37 @@ public class Test implements ApplicationListener, InputProcessor {
 	    debugRenderer.render(world, cameraCopy.scl(Util.BOX_TO_WORLD));
 	}
 	
+
+
+	private boolean fixedStep(float delta) {
+		  physicsTimeLeft += delta;
+          if (physicsTimeLeft > MAX_TIME_PER_FRAME)
+                  physicsTimeLeft = MAX_TIME_PER_FRAME;
+
+          boolean stepped = false;
+          while (physicsTimeLeft >= TIME_STEP) {
+                  world.step(TIME_STEP, VELOCITY_ITERS, POSITION_ITERS);
+                  physicsTimeLeft -= TIME_STEP;
+                  stepped = true;
+          }
+          return stepped;		
+	}
+
 	private void smoothStates()
 	{
 	    float oneMinusRatio = 1.0f - fixedTimestepAccumulatorRatio;
-	 
         float posX = fixedTimestepAccumulatorRatio * player.getBody().getPosition().x + (oneMinusRatio * player.getSprite().getPreviousPosition().x);
         float posY = fixedTimestepAccumulatorRatio * player.getBody().getPosition().y + (oneMinusRatio * player.getSprite().getPreviousPosition().y);
         player.getSprite().setPosition(posX * Util.BOX_TO_WORLD - player.getSprite().getWidth() / 2, posY * Util.BOX_TO_WORLD - player.getSprite().getHeight() / 2);
  
         //texture.rotation = box2Dbody.GetAngle() * fixedTimestepAccumulatorRatio + oneMinusRatio * body.previousAngle;
+	}
+	
+	private void setSrpiteStates(){
+		   float posX =  player.getBody().getPosition().x ;
+	        float posY =  player.getBody().getPosition().y ;
+	        player.getSprite().setPosition(posX * Util.BOX_TO_WORLD - player.getSprite().getWidth() / 2, posY * Util.BOX_TO_WORLD - player.getSprite().getHeight() / 2);
+	 
 	}
 	 
 	private void resetSmoothStates()
@@ -132,7 +200,7 @@ public class Test implements ApplicationListener, InputProcessor {
 	
 	private void singleStep(float dt)
 	{
-	    world.step(dt, velocityIterations, positionIterations);
+	    world.step(dt, VELOCITY_ITERS, POSITION_ITERS);
 	}
 	
 	private ContactListener contactListener = new ContactListener() {
@@ -163,6 +231,8 @@ public class Test implements ApplicationListener, InputProcessor {
 
 	@Override
 	public void resize(int width, int height) {
+		w=width;
+		h=height;
 	}
 
 	@Override
@@ -179,6 +249,10 @@ public class Test implements ApplicationListener, InputProcessor {
 
 	@Override
 	public boolean keyDown(int keycode) {
+		if(keycode== Keys.SPACE){
+			motor++;
+			if(motor>2) motor=0;
+		}
 		return false;
 	}
 
@@ -194,7 +268,11 @@ public class Test implements ApplicationListener, InputProcessor {
 
 	@Override
 	public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-		if(puedeSaltar){
+		if(screenY<h/2){
+			motor++;
+			if(motor>2) motor=0;
+		}
+		else if(puedeSaltar){
 			player.getBody().applyLinearImpulse(new Vector2(0, 2), player.getBody().getWorldCenter());
 			player.getBody().setAngularVelocity(-8.5f);
 			player.getBody().setAngularDamping(1);
